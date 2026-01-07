@@ -1,201 +1,204 @@
-<?php
-/**
- * NexBook Pro · 数据导入工具
- * 用于将旧 JSON 数据迁移至新数据库
- */
+#!/bin/bash
 
-header('Content-Type: text/html; charset=utf-8');
-echo "<style>body{font-family:sans-serif;line-height:1.6;padding:20px;background:#f1f5f9;color:#334155} .log{background:#fff;padding:15px;border-radius:8px;border:1px solid #cbd5e1;margin-bottom:10px;font-size:13px;font-family:monospace;} .success{color:green;} .info{color:blue;} .error{color:red;font-weight:bold;}</style>";
-echo "<h1>开始数据导入流程...</h1>";
+# =========================================================
+# NKX Network x 苏晨云 - VPS 专属初始化脚本 (完美对齐版)
+# =========================================================
 
-// --- 1. 连接数据库 (使用与主系统相同的配置) ---
-$envPath = __DIR__ . '/.env';
-if (file_exists($envPath)) {
-    $lines = file($envPath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    foreach ($lines as $line) {
-        if (strpos(trim($line), '#') === 0) continue;
-        list($n, $v) = explode('=', $line, 2);
-        $_ENV[trim($n)] = trim($v);
-    }
+# --- 1. 样式与颜色定义 ---
+# 字体颜色
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+PLAIN='\033[0m'
+
+# 品牌墙样式 (核心修改：使用高亮白字+深色背景)
+# \033[44;97m = 蓝底(44) + 亮白字(97)
+STYLE_L='\033[44;97m' 
+# \033[42;97m = 绿底(42) + 亮白字(97)
+STYLE_R='\033[42;97m'
+RESET='\033[0m'
+
+# --- 2. 准备平铺内容 (严丝合缝对齐) ---
+# 左边：NKXNetwork (10字符)，重复3次 = 30字符宽度
+STR_L="NKXNetworkNKXNetworkNKXNetwork"
+# 右边：苏晨云 (3汉字=6宽度)，重复5次 = 30字符宽度
+STR_R="苏晨云苏晨云苏晨云苏晨云苏晨云"
+
+# --- 3. 权限检查 ---
+[[ $EUID -ne 0 ]] && echo -e "${RED}错误: 请使用 root 用户运行此脚本！${PLAIN}" && exit 1
+
+# --- 4. 视觉函数：品牌墙展示 ---
+show_banner() {
+    clear
+    echo -e "${RESET}"
+    
+    # === 上半部分：密集色块墙 (6行) ===
+    for i in {1..6}; do
+        # 直接拼接左右两边，中间无空格，形成无缝墙体
+        echo -e "${STYLE_L}${STR_L}${RESET}${STYLE_R}${STR_R}${RESET}"
+    done
+    
+    # === 中间层：带文字的色块 (模拟 SPONSOR 标题) ===
+    # 这里手动调整了空格，保证总宽度依然是左右各30
+    echo -e "${STYLE_L}   NKX Network 官方控制台     ${RESET}${STYLE_R}      苏晨云 核心合作伙伴     ${RESET}"
+    
+    # === 下半部分：密集色块墙 (6行) ===
+    for i in {1..6}; do
+        echo -e "${STYLE_L}${STR_L}${RESET}${STYLE_R}${STR_R}${RESET}"
+    done
+    
+    echo -e "${RESET}\n"
+    echo -e " >> 欢迎使用 NKX Network 服务器初始化工具"
+    echo -e " >> 当前时间: $(date "+%Y-%m-%d %H:%M:%S")"
+    echo -e "===============================================================\n"
 }
 
-$dbHost = $_ENV['DB_HOST'] ?? '127.0.0.1';
-$dbName = $_ENV['DB_NAME'] ?? 'cabinet_manager';
-$dbUser = $_ENV['DB_USER'] ?? 'root';
-$dbPass = $_ENV['DB_PASS'] ?? '';
+# --- 5. 功能模块 ---
 
-try {
-    $pdo = new PDO("mysql:host=$dbHost;dbname=$dbName;charset=utf8mb4", $dbUser, $dbPass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC
-    ]);
-    echo "<div class='log success'>[系统] 数据库连接成功</div>";
-} catch (PDOException $e) {
-    die("<div class='log error'>[错误] 数据库连接失败: " . $e->getMessage() . "</div>");
+# [功能1] 修改 Root 密码
+func_password() {
+    echo -e "${YELLOW}> [任务] 修改 Root 密码${PLAIN}"
+    read -p "请输入新的密码: " MY_PASSWORD
+    if [[ -n "$MY_PASSWORD" ]]; then
+        echo "root:$MY_PASSWORD" | chpasswd
+        echo -e "${GREEN}√ 密码修改成功！${PLAIN}"
+    else
+        echo -e "${RED}× 未输入密码，跳过。${PLAIN}"
+    fi
 }
 
-// --- 2. 原始 JSON 数据 ---
-$json_data = '[
-  {
-    "id": 4,
-    "name": "浪潮5112M5",
-    "type": "1U",
-    "nodes": 1,
-    "tenant": "大负豪",
-    "mainip": "110.42.96.8",
-    "start_date": "2024-07-15",
-    "end_date": "2025-11-15",
-    "remark": "A13铂金8252C\nKSV2407161006",
-    "created_at": "2025-12-29 12:11:38",
-    "updated_at": "2025-12-29 12:20:54",
-    "ips": [
-      { "addr": "110.42.10.240", "type": "三线BGP 10G", "price": 100 },
-      { "addr": "110.42.96.69", "type": "电信100G 普防", "price": 30 },
-      { "addr": "114.66.56.242", "type": "电信100G 普防", "price": 30 },
-      { "addr": "114.66.56.244", "type": "电信100G 普防", "price": 30 },
-      { "addr": "114.66.56.249", "type": "电信100G 普防", "price": 30 },
-      { "addr": "114.66.28.187", "type": "电信100G 普防", "price": 30 },
-      { "addr": "114.66.28.188", "type": "电信100G 普防", "price": 30 },
-      { "addr": "114.66.28.189", "type": "电信100G 普防", "price": 30 },
-      { "addr": "114.66.28.190", "type": "电信100G 普防", "price": 30 },
-      { "addr": "114.66.28.191", "type": "电信100G 普防", "price": 30 }
-    ],
-    "start": "2024-07-15",
-    "end": "2025-11-15"
-  },
-  {
-    "id": 5,
-    "name": "浪潮5212M5",
-    "type": "2U",
-    "nodes": 1,
-    "tenant": "大负豪",
-    "mainip": "110.42.96.105",
-    "start_date": "2024-11-12",
-    "end_date": "2025-12-12",
-    "remark": "htyuty\nKSV2511122002",
-    "created_at": "2025-12-29 12:13:06",
-    "updated_at": "2025-12-29 12:21:17",
-    "ips": [
-      { "addr": "110.42.96.72", "type": "电信100G 普防", "price": 30 }
-    ],
-    "start": "2024-11-12",
-    "end": "2025-12-12"
-  },
-  {
-    "id": 6,
-    "name": "Dell R620",
-    "type": "1U",
-    "nodes": 1,
-    "tenant": "大负豪",
-    "mainip": "110.42.65.164",
-    "start_date": "2024-07-15",
-    "end_date": "2025-11-15",
-    "remark": "俏皮\nKSV2407161004",
-    "created_at": "2025-12-29 12:16:20",
-    "updated_at": "2025-12-29 12:21:51",
-    "ips": [
-      { "addr": "110.42.11.251", "type": "三线BGP 10G", "price": 100 }
-    ],
-    "start": "2024-07-15",
-    "end": "2025-11-15"
-  },
-  {
-    "id": 7,
-    "name": "浪潮5112M5",
-    "type": "1U",
-    "nodes": 1,
-    "tenant": "大负豪",
-    "mainip": "110.42.96.16",
-    "start_date": "2025-10-28",
-    "end_date": "2025-11-28",
-    "remark": "Ana\nKSV2507111003",
-    "created_at": "2025-12-29 12:18:34",
-    "updated_at": "2025-12-29 12:19:34",
-    "ips": [
-      { "addr": "110.42.14.213", "type": "三线BGP 10G", "price": 100 },
-      { "addr": "110.42.96.125", "type": "电信100G 普防", "price": 30 }
-    ],
-    "start": "2025-10-28",
-    "end": "2025-11-28"
-  }
-]';
-
-$items = json_decode($json_data, true);
-
-if (!$items) {
-    die("<div class='log error'>JSON 解析失败，请检查格式</div>");
+# [功能2] 修改主机名
+func_hostname() {
+    echo -e "${YELLOW}> [任务] 修改主机名${PLAIN}"
+    read -p "请输入新的主机名 (默认: nkx-node): " MY_HOSTNAME
+    [[ -z "$MY_HOSTNAME" ]] && MY_HOSTNAME="nkx-node"
+    
+    hostnamectl set-hostname "$MY_HOSTNAME"
+    # 修正 hosts 文件，防止重复堆叠
+    sed -i '/127.0.0.1/d' /etc/hosts
+    echo "127.0.0.1 localhost $MY_HOSTNAME" >> /etc/hosts
+    echo -e "${GREEN}√ 主机名已设置为: $MY_HOSTNAME${PLAIN}"
 }
 
-// --- 3. 循环处理数据 ---
-foreach ($items as $item) {
-    echo "<div class='log'>";
-    $pdo->beginTransaction(); // 开启事务，保证数据完整性
-
-    try {
-        // A. 处理用户 (tenant)
-        $username = trim($item['tenant']);
-        if (empty($username)) $username = '默认用户';
-
-        // 检查用户是否存在
-        $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ?");
-        $stmt->execute([$username]);
-        $userId = $stmt->fetchColumn();
-
-        if ($userId) {
-            echo "<span class='info'>[用户] 用户 '{$username}' 已存在 (ID: {$userId})。</span><br>";
-        } else {
-            // 不存在则创建，默认密码 123456
-            $defaultPass = password_hash('123456', PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare("INSERT INTO users (username, password, role) VALUES (?, ?, 'user')");
-            $stmt->execute([$username, $defaultPass]);
-            $userId = $pdo->lastInsertId();
-            echo "<span class='success'>[用户] 新建用户 '{$username}' (ID: {$userId})，默认密码 123456。</span><br>";
-        }
-
-        // B. 处理服务器
-        // 注意：我们让数据库自动生成新 ID，而不是使用旧 ID，避免冲突
-        $sql = "INSERT INTO servers (user_id, name, type, nodes, mainip, start_date, end_date, remark, status) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')";
-        
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute([
-            $userId,
-            $item['name'],
-            $item['type'],
-            $item['nodes'],
-            $item['mainip'],
-            $item['start_date'],
-            $item['end_date'],
-            $item['remark']
-        ]);
-        $newServerId = $pdo->lastInsertId();
-        echo "<span class='success'>[资产] 导入服务器 '{$item['name']}' 成功 (新ID: {$newServerId})。</span><br>";
-
-        // C. 处理 IP
-        if (!empty($item['ips']) && is_array($item['ips'])) {
-            $ipStmt = $pdo->prepare("INSERT INTO server_ips (server_id, addr, type, price) VALUES (?, ?, ?, ?)");
-            foreach ($item['ips'] as $ip) {
-                // 有些旧数据价格可能是 null，转为 0
-                $price = isset($ip['price']) ? $ip['price'] : 0;
-                $ipStmt->execute([
-                    $newServerId,
-                    $ip['addr'],
-                    $ip['type'],
-                    $price
-                ]);
-            }
-            echo "<span class='info'>[IP] 成功关联 " . count($item['ips']) . " 个额外IP。</span>";
-        }
-
-        $pdo->commit();
-        echo "</div>";
-
-    } catch (Exception $e) {
-        $pdo->rollBack();
-        echo "<span class='error'>[失败] 导入 {$item['name']} 时出错: " . $e->getMessage() . "</span></div>";
-    }
+# [功能3] 开启 BBR + FQ
+func_bbr() {
+    echo -e "${YELLOW}> [任务] 开启 BBR 加速${PLAIN}"
+    if ! grep -q "net.ipv4.tcp_congestion_control = bbr" /etc/sysctl.conf; then
+        echo "net.core.default_qdisc = fq" >> /etc/sysctl.conf
+        echo "net.ipv4.tcp_congestion_control = bbr" >> /etc/sysctl.conf
+        sysctl -p >/dev/null 2>&1
+        echo -e "${GREEN}√ BBR 已成功开启！${PLAIN}"
+    else
+        echo -e "${GREEN}√ BBR 之前已开启，无需重复操作。${PLAIN}"
+    fi
 }
 
-echo "<h2>🎉 全部操作结束。请前往主页查看，并删除此文件。</h2>";
-echo "<a href='/' style='display:inline-block;padding:10px 20px;background:#000;color:#fff;text-decoration:none;border-radius:5px;'>返回主页</a>";
-?>
+# [功能4] 系统基础优化 (时区+软件)
+func_system_base() {
+    echo -e "${YELLOW}> [任务] 系统环境优化 (时区 & 常用软件)${PLAIN}"
+    
+    # 1. 设置时区
+    timedatectl set-timezone Asia/Shanghai
+    echo -e "  - 时区设置为: Asia/Shanghai"
+    
+    # 2. 更新软件源并安装工具
+    echo -e "  - 正在后台更新系统源并安装 curl, wget, vim, git... (请耐心等待)"
+    
+    # 设置非交互模式，防止 apt 弹窗询问
+    export DEBIAN_FRONTEND=noninteractive
+    
+    if [ -f /etc/debian_version ]; then
+        apt-get update -y >/dev/null 2>&1
+        apt-get install -y curl wget vim git htop unzip tar screen >/dev/null 2>&1
+    elif [ -f /etc/redhat-release ]; then
+        yum update -y >/dev/null 2>&1
+        yum install -y curl wget vim git htop unzip tar screen >/dev/null 2>&1
+    fi
+    echo -e "${GREEN}√ 基础软件安装完成。${PLAIN}"
+}
+
+# [功能5] SSH 防掉线
+func_ssh_keepalive() {
+     echo -e "${YELLOW}> [任务] 配置 SSH 防掉线${PLAIN}"
+     # 如果不存在配置则追加，存在则修改
+     grep -q "^ClientAliveInterval" /etc/ssh/sshd_config && sed -i 's/^ClientAliveInterval.*/ClientAliveInterval 60/' /etc/ssh/sshd_config || echo "ClientAliveInterval 60" >> /etc/ssh/sshd_config
+     grep -q "^ClientAliveCountMax" /etc/ssh/sshd_config && sed -i 's/^ClientAliveCountMax.*/ClientAliveCountMax 30/' /etc/ssh/sshd_config || echo "ClientAliveCountMax 30" >> /etc/ssh/sshd_config
+     
+     # 重启 SSH 服务
+     service sshd restart 2>/dev/null || systemctl restart sshd
+     echo -e "${GREEN}√ SSH 配置已优化 (心跳间隔 60s)。${PLAIN}"
+}
+
+# --- 6. 预设方案 (One-Click Setup) ---
+func_preset_1() {
+    echo -e "\n${YELLOW}=== 正在运行：预设方案 1 (全自动初始化) ===${PLAIN}"
+    echo -e "包含：改名 + 改密 + 时区 + 软件更新 + BBR + SSH优化\n"
+    
+    # 统一询问环节
+    read -p "1. 请输入新的主机名 (回车默认 nkx-node): " P_HOSTNAME
+    [[ -z "$P_HOSTNAME" ]] && P_HOSTNAME="nkx-node"
+    
+    read -p "2. 请输入新的 Root 密码 (回车不修改): " P_PASSWORD
+    
+    echo -e "\n${GREEN}>>> 参数已确认，开始自动执行...${PLAIN}\n"
+    
+    # 1. 改名
+    hostnamectl set-hostname "$P_HOSTNAME"
+    sed -i '/127.0.0.1/d' /etc/hosts
+    echo "127.0.0.1 localhost $P_HOSTNAME" >> /etc/hosts
+    echo -e "${GREEN}[1/5] 主机名设置完成${PLAIN}"
+    
+    # 2. 改密
+    if [[ -n "$P_PASSWORD" ]]; then
+        echo "root:$P_PASSWORD" | chpasswd
+        echo -e "${GREEN}[2/5] 密码修改完成${PLAIN}"
+    else
+        echo -e "${YELLOW}[2/5] 跳过密码修改${PLAIN}"
+    fi
+    
+    # 3. 系统优化
+    func_system_base
+    echo -e "${GREEN}[3/5] 系统环境优化完成${PLAIN}"
+    
+    # 4. BBR
+    func_bbr
+    echo -e "${GREEN}[4/5] BBR 加速开启完成${PLAIN}"
+    
+    # 5. SSH
+    func_ssh_keepalive
+    echo -e "${GREEN}[5/5] SSH 防掉线配置完成${PLAIN}"
+    
+    echo -e "\n${GREEN}=========================================${PLAIN}"
+    echo -e "${GREEN}   预设方案执行完毕！请重新登录 VPS。   ${PLAIN}"
+    echo -e "${GREEN}=========================================${PLAIN}"
+}
+
+# --- 7. 主菜单逻辑 ---
+while true; do
+    show_banner
+    echo -e "请选择操作："
+    echo -e "${GREEN}1.${PLAIN} 修改 Root 密码"
+    echo -e "${GREEN}2.${PLAIN} 修改主机名 (Hostname)"
+    echo -e "${GREEN}3.${PLAIN} 一键开启 BBR + FQ"
+    echo -e "${GREEN}4.${PLAIN} ${YELLOW}预设方案 1 (一键全能初始化)${PLAIN} ${RED}<- 推荐${PLAIN}"
+    echo -e "${GREEN}5.${PLAIN} SSH 防掉线优化"
+    echo -e "${GREEN}0.${PLAIN} 退出脚本"
+    echo ""
+    read -p "请输入数字 [0-5]: " choice
+
+    case "$choice" in
+        1) func_password ;;
+        2) func_hostname ;;
+        3) func_bbr ;;
+        4) func_preset_1 ;;
+        5) func_ssh_keepalive ;;
+        0) exit 0 ;;
+        *) echo -e "\n${RED}无效输入，请重试。${PLAIN}" ;;
+    esac
+
+    # 暂停等待用户确认，非退出操作都暂停
+    echo ""
+    if [[ "$choice" != "0" ]]; then
+        read -p "按回车键返回主菜单..."
+    fi
+done
